@@ -1,3 +1,7 @@
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/app/api/auth/[...nextauth]/route'
+import { isSubscribed, getUserByEmail } from '@/lib/db'
+
 import OpenAI from 'openai'
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -10,7 +14,7 @@ const TRANSLATE_TONE = {
   business: 'ビジネスシーンで使えるプロフェッショナルだが自然な表現。',
   polite:   '丁寧で礼儀正しく、温かみのある表現。',
   email:    'ビジネスメールとしてそのままコピペできる形式。適切な挨拶から締めまで含める。',
-  menu:     'メニュー名の翻訳＋料理の説明（食材・調理法・味の特徴）を加える。'
+  menu:     'メニュー名を翻訳し、各料理について食材・調理法・味の特徴・食感を2〜3文で必ず説明する。複数ある場合は全ての料理を番号付きで説明すること。'
 }
 
 // スタイル変換モード（同じ言語内）のプロンプト
@@ -43,19 +47,40 @@ ${text}`,
 メールの内容・目的:
 ${text}`,
 
-  menu: (text, lang) => `以下のメニュー名または料理名について、${LANG_NAMES[lang]||lang}で説明文を作成してください。
-食材・調理法・味の特徴・食感などを含めた、お客様に伝わる魅力的な説明にしてください。
-複数ある場合は各料理を丁寧に説明してください。
-結果のみを返してください（説明不要）。
+  menu: (text, lang) => {
+    const items = text.trim().split(/\n|、|,/).map(s => s.trim()).filter(Boolean)
+    const isSingle = items.length <= 1
+    return `以下の${isSingle ? 'メニュー' : `${items.length}つのメニュー`}について、${LANG_NAMES[lang]||lang}で説明してください。
+
+【必須ルール】
+- メニュー名の翻訳（${LANG_NAMES[lang]||lang}）
+- 食材・調理法・味の特徴・食感を2〜3文で説明
+${isSingle ? '' : `- 全${items.length}品、必ず全てを説明すること（省略禁止）
+- 各メニューを「1. 〇〇」のように番号付きで区切る`}
+
+結果のみを返してください（前置き・後書き不要）。
 
 メニュー:
 ${text}`
+  }
 }
 
 export async function POST(req) {
   try {
-    const { text, srcLang, tgtLang, tone } = await req.json()
+    // ログイン確認
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return Response.json({ error: 'ログインが必要です', code: 'UNAUTHORIZED' }, { status: 401 })
+    }
+
+    // サブスク確認（無料プランは1日5回まで）
+    const subscribed = await isSubscribed(session.user.email)
+    const { text, srcLang, tgtLang, tone, usageCount } = await req.json()
     if (!text) return Response.json({ error: 'text is required' }, { status: 400 })
+
+    if (!subscribed && usageCount >= 5) {
+      return Response.json({ error: '本日の無料枠（5回）を使い切りました。Proプランにアップグレードすると無制限で使えます。', code: 'LIMIT_REACHED' }, { status: 403 })
+    }
 
     const isSameLang = srcLang === tgtLang
     let prompt
