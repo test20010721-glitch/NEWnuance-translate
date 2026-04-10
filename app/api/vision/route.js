@@ -12,19 +12,19 @@ export async function POST(req) {
     const tgtName = LANG_NAMES[tgtLang] || tgtLang
 
     const promptText = tone === 'menu'
-      ? `この画像に写っているメニューを全て読み取り、${tgtName}で説明してください。
+      ? `この画像に写っている全メニューを読み取り、1品も省略せず全て説明してください。
 
-【必須ルール】
-- 画像内の全メニューを省略せず全て対象にする
-- 各メニューを「1. 〇〇」のように番号付きで区切る
-- メニュー名の翻訳（${tgtName}）
-- 食材・調理法・味の特徴・食感を2〜3文で説明
-- 前置き・後書き不要、結果のみ返す`
+【厳守ルール】
+- 画像内の全メニューを絶対に省略しない
+- 各メニューの形式：
+  [番号]. [メニュー名の${tgtName}訳]
+  説明：[食材・調理法・味の特徴・食感を2文で説明]
+- 前置き・後書き・コメント一切不要、結果のみ返す`
       : `この画像のテキストを読み取り、${tgtName}に自然なニュアンスで翻訳してください。翻訳結果のみを返してください。`
 
     const response = await client.chat.completions.create({
       model: 'gpt-4o-mini',
-      max_tokens: 2000,
+      max_tokens: 4000,
       messages: [{
         role: 'user',
         content: [
