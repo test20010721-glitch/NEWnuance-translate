@@ -49,19 +49,19 @@ ${text}`,
 
   menu: (text, lang) => {
     const items = text.trim().split(/\n|、|,/).map(s => s.trim()).filter(Boolean)
-    const isSingle = items.length <= 1
-    return `以下の${isSingle ? 'メニュー' : `${items.length}つのメニュー`}について、${LANG_NAMES[lang]||lang}で説明してください。
+    const count = items.length
+    const numbered = items.map((item, i) => `${i+1}. ${item}`).join('\n')
+    return `以下の${count}品のメニューを、1品も省略せず全て説明してください。
 
-【必須ルール】
-- メニュー名の翻訳（${LANG_NAMES[lang]||lang}）
-- 食材・調理法・味の特徴・食感を2〜3文で説明
-${isSingle ? '' : `- 全${items.length}品、必ず全てを説明すること（省略禁止）
-- 各メニューを「1. 〇〇」のように番号付きで区切る`}
+【厳守ルール】
+- 必ず${count}品全て説明すること（絶対に省略しない）
+- 各メニューの形式：
+  [番号]. [メニュー名の${LANG_NAMES[lang]||lang}訳]
+  説明：[食材・調理法・味の特徴・食感を2文で説明]
+- 前置き・後書き・コメント一切不要、結果のみ返す
 
-結果のみを返してください（前置き・後書き不要）。
-
-メニュー:
-${text}`
+メニューリスト（${count}品）:
+${numbered}`
   }
 }
 
@@ -107,7 +107,7 @@ ${text}`
 
     const response = await client.chat.completions.create({
       model: 'gpt-4o-mini',
-      max_tokens: 1500,
+      max_tokens: 4000,
       messages: [{ role: 'user', content: prompt }]
     })
 
