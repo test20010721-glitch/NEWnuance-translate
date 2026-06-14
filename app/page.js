@@ -66,6 +66,8 @@ export default function Home() {
   const recognitionRef = useRef(null)
   const textareaRef = useRef(null)
   const prevInputRef = useRef('')
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
   const L = LANGS[srcLang] || LANGS.en
   const isSameMode = srcLang === tgtLang
   const isSubscribed = session?.user?.subscriptionStatus === 'active'
@@ -127,40 +129,74 @@ export default function Home() {
     navigator.clipboard.writeText(result).then(() => { setShowToast(true); setTimeout(() => setShowToast(false), 2000) })
   }
 
-  const handleMic = () => {
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-
-    if (isIOS) {
-      prevInputRef.current = inputText
-      setShowIOSHint(true); setIsListening(true)
-      textareaRef.current?.focus()
-      setTimeout(() => { setShowIOSHint(false); setIsListening(false) }, 10000)
+  const handleMic = async () => {
+    // 録音中なら停止して文字起こし
+    if (isListening) {
+      mediaRecorderRef.current?.stop()
       return
     }
 
-    if (!SR) { alert('このブラウザは音声入力に対応していません。'); return }
-    if (isListening) { recognitionRef.current?.stop(); return }
+    // マイクへのアクセスを要求
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioChunksRef.current = []
 
-    const rec = new SR()
-    recognitionRef.current = rec
-    rec.continuous = false
-    rec.interimResults = false
-    // ★修正ポイント：srcLang（入力言語）に合わせて音声認識言語を設定
-    rec.lang = SPEECH_LANG[srcLang] || 'ja-JP'
+      const mediaRecorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = mediaRecorder
 
-    rec.onstart = () => setIsListening(true)
-    rec.onresult = (e) => {
-      const transcript = Array.from(e.results).map(r => r[0].transcript).join('')
-      setInputText(transcript)
-      translate(transcript)
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      mediaRecorder.onstop = async () => {
+        // ストリームを停止
+        stream.getTracks().forEach(track => track.stop())
+        setIsListening(false)
+
+        if (audioChunksRef.current.length === 0) return
+
+        setIsLoading(true)
+        setResult('🎙 音声を認識中...')
+
+        try {
+          // 音声データをBlobに変換
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+          const audioFile = new File([audioBlob], 'audio.webm', { type: 'audio/webm' })
+
+          // Whisper APIに送信
+          const formData = new FormData()
+          formData.append('audio', audioFile)
+          formData.append('srcLang', srcLang)
+
+          const res = await fetch('/api/whisper', {
+            method: 'POST',
+            body: formData
+          })
+          const data = await res.json()
+          if (data.error) throw new Error(data.error)
+
+          const transcript = data.text?.trim()
+          if (!transcript) { setResult('音声が認識できませんでした。もう一度お試しください。'); setIsLoading(false); return }
+
+          setInputText(transcript)
+          setIsLoading(false)
+          // 文字起こし後に自動翻訳
+          await translate(transcript)
+        } catch(e) {
+          setResult('音声認識エラー: ' + e.message)
+          setIsLoading(false)
+        }
+      }
+
+      mediaRecorder.start()
+      setIsListening(true)
+    } catch(e) {
+      if (e.name === 'NotAllowedError') {
+        alert('マイクへのアクセスを許可してください。\nブラウザの設定でマイクを許可してください。')
+      } else {
+        alert('マイクを開始できませんでした: ' + e.message)
+      }
     }
-    rec.onerror = (e) => {
-      if (e.error === 'not-allowed') alert('マイクへのアクセスを許可してください。')
-      setIsListening(false)
-    }
-    rec.onend = () => setIsListening(false)
-    try { rec.start() } catch(e) { setIsListening(false) }
   }
 
   const handleCam = () => {
@@ -298,7 +334,7 @@ export default function Home() {
         <div style={c.panelHeader}>
           <span style={c.panelLabel}>{L.src}</span>
           <div style={c.panelActions}>
-            <button style={c.iconBtn(isListening)} onClick={handleMic} title={`音声入力（${SPEECH_LANG[srcLang]}）`}>
+            <button style={c.iconBtn(isListening)} onClick={handleMic} title="音声入力（Whisper AI）">
               {isListening ? '⏹' : '🎙'}
             </button>
             <button style={c.iconBtn(false)} onClick={handleCam}>📷</button>
@@ -306,16 +342,10 @@ export default function Home() {
           </div>
         </div>
 
-        {showIOSHint && (
+        {isListening && (
           <div style={c.banner('blue')}>
-            <span>キーボード右下の 🎤 をタップして話してください</span>
-            <button style={c.stopBtn} onClick={() => { setShowIOSHint(false); setIsListening(false) }}>閉じる</button>
-          </div>
-        )}
-        {isListening && !showIOSHint && (
-          <div style={c.banner('blue')}>
-            <span style={{ animation: 'pulse 1.5s infinite' }}>{L.listening}（{SPEECH_LANG[srcLang]}）</span>
-            <button style={c.stopBtn} onClick={() => { recognitionRef.current?.stop(); setIsListening(false) }}>{L.tapStop}</button>
+            <span style={{ animation: 'pulse 1.5s infinite' }}>🔴 録音中... 話し終わったら🎙をタップして停止</span>
+            <button style={c.stopBtn} onClick={() => mediaRecorderRef.current?.stop()}>停止</button>
           </div>
         )}
 
