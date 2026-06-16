@@ -63,6 +63,8 @@ export default function Home() {
   const [isFav, setIsFav] = useState(false)
   const [usageCount, setUsageCount] = useState(0)
   const [showUpgradeMsg, setShowUpgradeMsg] = useState(false)
+  const [isSpeakingInput, setIsSpeakingInput] = useState(false)
+  const [isSpeakingResult, setIsSpeakingResult] = useState(false)
   const recognitionRef = useRef(null)
   const textareaRef = useRef(null)
   const prevInputRef = useRef('')
@@ -197,6 +199,35 @@ export default function Home() {
         alert('マイクを開始できませんでした: ' + e.message)
       }
     }
+  }
+
+  // テキスト読み上げ関数
+  const speak = (text, lang, onStart, onEnd) => {
+    if (!text) return
+    window.speechSynthesis.cancel() // 既存の読み上げを停止
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = lang
+    utterance.rate = 0.9
+    utterance.onstart = () => onStart(true)
+    utterance.onend = () => onEnd(false)
+    utterance.onerror = () => onEnd(false)
+    window.speechSynthesis.speak(utterance)
+  }
+
+  const stopSpeaking = () => {
+    window.speechSynthesis.cancel()
+    setIsSpeakingInput(false)
+    setIsSpeakingResult(false)
+  }
+
+  const handleSpeakInput = () => {
+    if (isSpeakingInput) { stopSpeaking(); return }
+    speak(inputText, SPEECH_LANG[srcLang] || 'ja-JP', setIsSpeakingInput, setIsSpeakingInput)
+  }
+
+  const handleSpeakResult = () => {
+    if (isSpeakingResult) { stopSpeaking(); return }
+    speak(result, SPEECH_LANG[tgtLang] || 'ja-JP', setIsSpeakingResult, setIsSpeakingResult)
   }
 
   const handleCam = () => {
@@ -337,6 +368,9 @@ export default function Home() {
             <button style={c.iconBtn(isListening)} onClick={handleMic} title="音声入力（Whisper AI）">
               {isListening ? '⏹' : '🎙'}
             </button>
+            <button style={c.iconBtn(isSpeakingInput)} onClick={handleSpeakInput} title="読み上げ">
+              {isSpeakingInput ? '⏹' : '🔊'}
+            </button>
             <button style={c.iconBtn(false)} onClick={handleCam}>📷</button>
             <button style={c.iconBtn(false)} onClick={() => { setInputText(''); setResult('') }}>✕</button>
           </div>
@@ -366,6 +400,9 @@ export default function Home() {
         <div style={c.panelHeader}>
           <span style={c.panelLabel}>{L.result}</span>
           <div style={c.panelActions}>
+            <button style={c.iconBtn(isSpeakingResult)} onClick={handleSpeakResult} title="読み上げ">
+              {isSpeakingResult ? '⏹' : '🔊'}
+            </button>
             <button style={c.iconBtn(false)} onClick={handleCopy}>⎘</button>
             <button style={c.iconBtn(isFav)} onClick={() => setIsFav(!isFav)}>{isFav ? '★' : '☆'}</button>
           </div>
